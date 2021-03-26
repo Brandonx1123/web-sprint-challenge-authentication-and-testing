@@ -1,8 +1,14 @@
-const router = require('express').Router();
+const router = require("express").Router();
+const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
+const { jwtSecret } = require("../secrets/index");
+const {
+  checkUsernameExists,
+  checkUsernameTaken,
+} = require("../middleware/auth-middleware");
+const Jokes = require("../jokes/jokes-model");
 
-router.post('/register', (req, res) => {
-  res.end('implement register, please!');
-  /*
+/*
     IMPLEMENT
     You are welcome to build additional middlewares to help with the endpoint's functionality.
     DO NOT EXCEED 2^8 ROUNDS OF HASHING!
@@ -27,11 +33,30 @@ router.post('/register', (req, res) => {
     4- On FAILED registration due to the `username` being taken,
       the response body should include a string exactly as follows: "username taken".
   */
+
+router.post("/register", checkUsernameTaken, (req, res) => {
+  const credentials = req.body;
+
+  if (credentials) {
+    const rounds = process.env.BCRYPT_ROUNDS || 8;
+
+    const hash = bcrypt.hashSync(credentials.password, rounds);
+
+    credentials.password = hash;
+
+    Jokes.add(credentials)
+      .then((user) => {
+        res.status(201).json(user);
+      })
+      .catch((err) => {
+        res.status(500).json({ message: err.message, stack: err.stack });
+      });
+  } else {
+    res.status(400).json({ message: "username and password required" });
+  }
 });
 
-router.post('/login', (req, res) => {
-  res.end('implement login, please!');
-  /*
+/*
     IMPLEMENT
     You are welcome to build additional middlewares to help with the endpoint's functionality.
 
@@ -54,6 +79,42 @@ router.post('/login', (req, res) => {
     4- On FAILED login due to `username` not existing in the db, or `password` being incorrect,
       the response body should include a string exactly as follows: "invalid credentials".
   */
+router.post("/login", checkUsernameExists, (req, res) => {
+  if (req.body) {
+    const { username, password } = req.body;
+
+    Jokes.findBy({ username: username })
+      .then(([user]) => {
+        if (user && bcrypt.compareSync(password, user.password)) {
+          const token = buildToken(user);
+          res
+            .status(200)
+            .json({ message: `welcome, ${user.username}`, token: token });
+        } else {
+          res.status(401).json({ message: "username and password required" });
+        }
+      })
+      .catch((err) => {
+        res.status(500).json({ message: err.message, stack: err.stack });
+      });
+  } else {
+    res.status(400).json({
+      message: "please provide username and password",
+    });
+  }
 });
+
+///function to create a TOKEN
+
+function buildToken(user) {
+  const payload = {
+    subject: user.id,
+    username: user.username,
+  };
+  const configuration = {
+    expiresIn: "1d",
+  };
+  return jwt.sign(payload, jwtSecret, configuration);
+}
 
 module.exports = router;
